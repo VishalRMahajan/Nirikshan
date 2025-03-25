@@ -29,25 +29,25 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 		navCCTV: [
 			{
 				title: 'Live Monitoring',
-				url: '#LiveCCTVFeed',
+				url: '/',
 				icon: Cctv,
 				isactive: true,
 			},
 			{
-				title: 'Edit CCTV Feed',
-				url: '#',
+				title: 'CCTV Settings',
+				url: '/cctv_setting',
 				icon: Pencil,
 			},
 		],
 		navIncident: [
 			{
 				title: 'Ongoing Incidents',
-				url: '#LiveCCTVFeed',
+				url: '/Ongoing_Incidents',
 				icon: Siren,
 			},
 			{
 				title: 'Past Incidents',
-				url: '#',
+				url: '/Past_Incidents',
 				icon: Ambulance,
 			},
 		],
