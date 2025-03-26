@@ -1,7 +1,7 @@
 'use client';
 import Dashboard from '@/components/dashboard';
 import dynamic from 'next/dynamic';
-import { CCTVTable } from '@/components/cctv-table';
+import { CCTVTable } from '@/components/cctv/CCTVTable';
 
 const MapComponent = dynamic(() => import('@/components/MapComponent'), {
 	ssr: false,

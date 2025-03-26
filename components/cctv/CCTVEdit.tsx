@@ -18,28 +18,34 @@ import {
 	SelectValue,
 } from '@/components/ui/select';
 import dynamic from 'next/dynamic';
+import { CCTV } from './types';
 
 const MapComponent = dynamic(() => import('@/components/MapComponent'), {
 	ssr: false,
 });
 
-type AddCCTVDialogProps = {
+type EditCCTVDialogProps = {
 	open: boolean;
 	onClose: () => void;
-	onAddCCTV: (cctv: {
-		name: string;
-		rtspUrl: string;
-		latitude: number;
-		longitude: number;
-		status: string;
-	}) => void;
+	cctv: CCTV | null;
+	onEditCCTV: (
+		id: string,
+		cctv: {
+			name: string;
+			rtspUrl: string;
+			latitude: number;
+			longitude: number;
+			status: string;
+		}
+	) => void;
 };
 
-export function AddCCTVDialog({
+export function EditCCTVDialog({
 	open,
 	onClose,
-	onAddCCTV,
-}: AddCCTVDialogProps) {
+	cctv,
+	onEditCCTV,
+}: EditCCTVDialogProps) {
 	const [name, setName] = React.useState('');
 	const [rtspUrl, setRtspUrl] = React.useState('');
 	const [status, setStatus] = React.useState('active');
@@ -47,6 +53,25 @@ export function AddCCTVDialog({
 		latitude: number;
 		longitude: number;
 	} | null>(null);
+
+	React.useEffect(() => {
+		if (cctv) {
+			setName(cctv.name);
+			setRtspUrl(cctv.rtspUrl);
+			setStatus(cctv.status);
+			setLocation({
+				latitude: cctv.latitude,
+				longitude: cctv.longitude,
+			});
+		}
+	}, [cctv]);
+
+	const handleDialogClose = () => {
+		onClose();
+		setTimeout(() => {
+			window.location.reload();
+		}, 50);
+	};
 
 	const handleMapClick = (lat: number, lng: number) => {
 		setLocation({ latitude: lat, longitude: lng });
@@ -58,7 +83,7 @@ export function AddCCTVDialog({
 	};
 
 	const handleSubmit = () => {
-		if (!name || !rtspUrl || !location) {
+		if (!cctv || !name || !rtspUrl || !location) {
 			alert('Please fill in all fields and select a location.');
 			return;
 		}
@@ -68,23 +93,28 @@ export function AddCCTVDialog({
 			return;
 		}
 
-		onAddCCTV({
+		const formData = {
 			name,
 			rtspUrl,
 			latitude: location.latitude,
 			longitude: location.longitude,
 			status,
-		});
-		onClose();
+		};
+
+		onEditCCTV(cctv.id, formData);
+
+		handleDialogClose();
 	};
 
+	if (!cctv) return null;
+
 	return (
-		<Dialog open={open} onOpenChange={onClose}>
+		<Dialog open={open} onOpenChange={handleDialogClose}>
 			<DialogContent className='h-[90vh] max-h-[90vh] w-[90vw] max-w-[90vw] overflow-auto bg-gray-900 p-0 text-white'>
 				<div className='flex h-full flex-col'>
 					<DialogHeader className='border-b border-gray-700 p-6'>
 						<DialogTitle className='text-xl font-semibold text-gray-100'>
-							Add New CCTV
+							Edit CCTV Camera
 						</DialogTitle>
 					</DialogHeader>
 
@@ -171,14 +201,14 @@ export function AddCCTVDialog({
 							<DialogFooter className='border-t border-gray-700 pt-4'>
 								<Button
 									variant='outline'
-									onClick={onClose}
+									onClick={handleDialogClose}
 									className='border-gray-600 text-gray-300 hover:bg-gray-800 hover:text-white'>
 									Cancel
 								</Button>
 								<Button
 									onClick={handleSubmit}
 									className='bg-blue-600 text-white hover:bg-blue-700'>
-									Add CCTV
+									Save Changes
 								</Button>
 							</DialogFooter>
 						</div>
@@ -187,14 +217,14 @@ export function AddCCTVDialog({
 						<div className='flex w-2/3 flex-col'>
 							<div className='p-6 pb-3'>
 								<label className='mb-2 block text-sm font-medium text-gray-300'>
-									Select Location on Map
+									Adjust Location on Map
 								</label>
 								<p className='mb-2 text-sm text-gray-400'>
-									Click on the map to set the CCTV location
+									Click on the map to update the CCTV location
 								</p>
 							</div>
 							<div className='relative flex-1 px-6 pb-6'>
-								<div className='absolute inset-0 mx-6 mb-6 overflow-hidden rounded-xl border border-gray-700'>
+								<div className='absolute inset-0 mx-6 mb-6 overflow-hidden rounded-md border border-gray-700'>
 									<MapComponent
 										onLocationSelect={latlng =>
 											handleMapClick(latlng.lat, latlng.lng)
@@ -207,6 +237,7 @@ export function AddCCTVDialog({
 													}
 												: null
 										}
+										initialZoom={15}
 									/>
 								</div>
 							</div>
