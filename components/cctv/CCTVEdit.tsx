@@ -68,9 +68,6 @@ export function EditCCTVDialog({
 
 	const handleDialogClose = () => {
 		onClose();
-		setTimeout(() => {
-			window.location.reload();
-		}, 50);
 	};
 
 	const handleMapClick = (lat: number, lng: number) => {

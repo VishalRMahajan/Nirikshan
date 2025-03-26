@@ -41,9 +41,6 @@ export const createColumns = (): ColumnDef<CCTV>[] => {
 				const errorData = await response.json();
 				throw new Error('Failed to update CCTV');
 			}
-			setTimeout(() => {
-				window.location.reload();
-			}, 5000);
 		} catch (error) {
 			console.error('Error updating CCTV:', error);
 			alert(error instanceof Error ? error.message : 'Failed to update CCTV');
@@ -205,7 +202,7 @@ export const createColumns = (): ColumnDef<CCTV>[] => {
 
 				return (
 					<>
-						<DropdownMenu>
+						<DropdownMenu modal={false}>
 							<DropdownMenuTrigger asChild>
 								<Button variant='ghost' size='icon' className='h-8 w-8'>
 									<MoreHorizontal className='h-4 w-4' />

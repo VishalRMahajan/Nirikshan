@@ -43,9 +43,6 @@ export function CCTVViewDetails({ open, onClose, cctv }: CCTVViewDetailsProps) {
 
 	const handleDialogClose = () => {
 		onClose();
-		setTimeout(() => {
-			window.location.reload();
-		}, 50);
 	};
 
 	return (
