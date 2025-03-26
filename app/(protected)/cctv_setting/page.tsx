@@ -1,10 +1,17 @@
+'use client';
 import Dashboard from '@/components/dashboard';
+import dynamic from 'next/dynamic';
+import { CCTVTable } from '@/components/cctv-table';
 
-export default function CCTVSetting() {
+const MapComponent = dynamic(() => import('@/components/MapComponent'), {
+	ssr: false,
+});
+
+export default function CCTVSettings() {
 	return (
 		<Dashboard>
-			<div className='flex flex-1 flex-col gap-4 p-4 pt-0'>
-				This is CCTV Setting Page
+			<div className='m-5'>
+				<CCTVTable />
 			</div>
 		</Dashboard>
 	);
