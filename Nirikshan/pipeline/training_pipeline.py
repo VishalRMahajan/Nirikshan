@@ -13,11 +13,11 @@ class TrainingPipeline:
     ACCIDENT_IMAGES_DIR = Path("accident_images")
     ACCIDENT_CLIPS_DIR.mkdir(parents=True, exist_ok=True)
     ACCIDENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    PRE_ACCIDENT_BUFFER_SIZE = 40
-    MAX_CLIP_FRAMES = 250
+    PRE_ACCIDENT_BUFFER_SIZE = 50
+    MAX_CLIP_FRAMES = 300
     FPS = 30
     LOST_THRESHOLD = 15
-    COOLDOWN_FRAMES = 15
+    COOLDOWN_FRAMES = 50
 
     def __init__(self):
         self.model_trainer = ModelTrainer()
@@ -45,14 +45,10 @@ class TrainingPipeline:
             x1, y1, x2, y2 = map(int, box)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.imwrite(filename, frame)
-        logging.info(f"Annotated image saved: {filename}")
 
     def process_frame(self, frame, save_image=True):
         self.frame_buffer.append(frame.copy())
         boxes, class_ids, confidences = self.model_trainer.detect_objects(frame)
-        logging.info(f"Detected boxes: {boxes}")
-        logging.info(f"Detected class IDs: {class_ids}")
-        logging.info(f"Detected confidences: {confidences}")
         accident_indices = [
             i for i, (cls, conf) in enumerate(zip(class_ids, confidences))
             if cls in self.ACCIDENT_CLASS_IDS and conf >= self.CONFIDENCE_THRESHOLD
@@ -99,36 +95,60 @@ class TrainingPipeline:
 
         return "Accident detected" if accident_detected else "No accident detected"
 
+    def reset_state(self):
+        """Reset all state variables for a new detection session"""
+        self.frame_buffer.clear()
+        self.accident_active = False
+        self.accident_clip_frames = []
+        self.lost_counter = 0
+        self.cooldown_frames = 0
+        self.accident_detected_in_video = False
+
     def process_video(self, video_path):
+        self.reset_state()
+        
         cap = cv2.VideoCapture(str(video_path))
         frame_index = 0
-        self.accident_detected_in_video = False
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-            self.process_frame(frame, save_image=False)
+            result = self.process_frame(frame, save_image=False)
+            if result == "Accident detected":
+                self.accident_detected_in_video = True
             frame_index += 1
         cap.release()
-        if self.accident_detected_in_video:
+        
+        if self.accident_active and self.accident_clip_frames:
             clip_filename = self.ACCIDENT_CLIPS_DIR / f"accident_clip_{self.clip_index:04d}.mp4"
             self.save_video_clip(self.accident_clip_frames, clip_filename)
             self.clip_index += 1
+        
         return "Accident detected" if self.accident_detected_in_video else "No accident detected"
 
     def process_live_feed(self, rtsp_url):
+        self.reset_state()
+        
         cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            return "Error: Could not open RTSP stream"
+        
         frame_index = 0
-        self.accident_detected_in_video = False
-        while cap.isOpened():
+        max_frames = 1000 
+        
+        while cap.isOpened() and frame_index < max_frames:
             ret, frame = cap.read()
             if not ret:
                 break
-            self.process_frame(frame, save_image=False)
+            result = self.process_frame(frame, save_image=False)
+            if result == "Accident detected":
+                self.accident_detected_in_video = True
             frame_index += 1
         cap.release()
-        if self.accident_detected_in_video:
+        
+        if self.accident_active and self.accident_clip_frames:
             clip_filename = self.ACCIDENT_CLIPS_DIR / f"accident_clip_{self.clip_index:04d}.mp4"
             self.save_video_clip(self.accident_clip_frames, clip_filename)
             self.clip_index += 1
+        
         return "Accident detected" if self.accident_detected_in_video else "No accident detected"
