@@ -11,13 +11,14 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUpDown, Copy, MoreHorizontal } from 'lucide-react';
+import { ArrowUpDown, Copy, Film, MoreHorizontal, Play } from 'lucide-react';
 import { CCTV } from './types';
 
 import { CCTVViewDetails } from './CCTVviewDetails';
 import { EditCCTVDialog } from './CCTVEdit';
 
 export const createColumns = (): ColumnDef<CCTV>[] => {
+	// Replace the existing handleEditCCTV function with this version
 	const handleEditCCTV = async (
 		id: string,
 		data: {
@@ -26,26 +27,79 @@ export const createColumns = (): ColumnDef<CCTV>[] => {
 			latitude: number;
 			longitude: number;
 			status: string;
+			accidentVideo?: File | null;
+			removeExistingVideo?: boolean;
 		}
 	) => {
 		try {
-			const response = await fetch(`/api/cctvs/${id}`, {
-				method: 'PATCH',
-				headers: {
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify(data),
-			});
+			const { accidentVideo, removeExistingVideo, ...jsonData } = data;
 
-			if (!response.ok) {
-				const errorData = await response.json();
-				throw new Error('Failed to update CCTV');
+			// Use FormData for multipart/form-data if there's a file, otherwise use JSON
+			if (accidentVideo || removeExistingVideo) {
+				const formData = new FormData();
+				formData.append('name', jsonData.name);
+				formData.append('rtspUrl', jsonData.rtspUrl);
+				formData.append('latitude', jsonData.latitude.toString());
+				formData.append('longitude', jsonData.longitude.toString());
+				formData.append('status', jsonData.status);
+
+				if (removeExistingVideo) {
+					formData.append('removeExistingVideo', 'true');
+				}
+
+				if (accidentVideo) {
+					formData.append('accidentVideo', accidentVideo);
+				}
+
+				const response = await fetch(`/api/cctvs/${id}`, {
+					method: 'PATCH',
+					body: formData,
+				});
+
+				if (!response.ok) {
+					const errorData = await response.json();
+					throw new Error(errorData.error || 'Failed to update CCTV');
+				}
+
+				// Force reload to display the updated data
+				window.location.reload();
+			} else {
+				// Use JSON for simpler updates without files
+				const response = await fetch(`/api/cctvs/${id}`, {
+					method: 'PATCH',
+					headers: {
+						'Content-Type': 'application/json',
+					},
+					body: JSON.stringify(jsonData),
+				});
+
+				if (!response.ok) {
+					const errorData = await response.json();
+					throw new Error(errorData.error || 'Failed to update CCTV');
+				}
 			}
 		} catch (error) {
 			console.error('Error updating CCTV:', error);
 			alert(error instanceof Error ? error.message : 'Failed to update CCTV');
 		}
 	};
+
+	const formatDate = (dateString: string | Date | null) => {
+		if (!dateString) return 'N/A';
+
+		try {
+			const date = new Date(dateString);
+			// Check if date is valid
+			if (isNaN(date.getTime())) {
+				return 'Invalid date';
+			}
+			return date.toLocaleString();
+		} catch (error) {
+			console.error('Error formatting date:', error);
+			return 'Invalid date';
+		}
+	};
+
 	return [
 		{
 			id: 'select',
@@ -182,15 +236,50 @@ export const createColumns = (): ColumnDef<CCTV>[] => {
 				</div>
 			),
 			cell: ({ row }) => {
-				const date = new Date(row.getValue<string>('createdAt'));
+				const rawDate = row.getValue('createdAt');
 				return (
-					<div className='text-sm text-gray-300'>
-						<div>{date.toLocaleDateString()}</div>
-						<div className='text-xs text-gray-400'>
-							{date.toLocaleTimeString()}
-						</div>
+					<div className='flex flex-col space-y-1'>
+						<div>{formatDate(rawDate as string | Date | null)}</div>
 					</div>
 				);
+			},
+		},
+		// Update this section only in your CCTVColumns.tsx file
+		{
+			accessorKey: 'hasAccidentVideo',
+			header: ({ column }) => (
+				<div
+					className='flex cursor-pointer items-center space-x-1'
+					onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+					<span>Accident Video</span>
+					<ArrowUpDown className='h-4 w-4 text-gray-400' />
+				</div>
+			),
+			cell: ({ row }) => {
+				const hasVideo = row.getValue<boolean | undefined>('hasAccidentVideo');
+				const videoUrl = row.original.accidentVideoUrl;
+
+				return (
+					<div>
+						{hasVideo && videoUrl ? (
+							<div className='flex items-center'>
+								<Button
+									variant='ghost'
+									size='sm'
+									className='text-blue-500 hover:text-blue-400'
+									onClick={() => window.open(videoUrl, '_blank')}>
+									<Film className='mr-2 h-4 w-4' />
+									<span>View Video</span>
+								</Button>
+							</div>
+						) : (
+							<span className='text-sm text-gray-500'>No video</span>
+						)}
+					</div>
+				);
+			},
+			filterFn: (row, id, value) => {
+				return value.includes(row.getValue(id) ? 'hasVideo' : 'noVideo');
 			},
 		},
 		{

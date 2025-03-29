@@ -101,14 +101,23 @@ export function CCTVTable() {
 		latitude: number;
 		longitude: number;
 		status: string;
+		accidentVideo?: File | null;
 	}) => {
 		try {
+			const formData = new FormData();
+			formData.append('name', newCCTV.name);
+			formData.append('rtspUrl', newCCTV.rtspUrl);
+			formData.append('latitude', newCCTV.latitude.toString());
+			formData.append('longitude', newCCTV.longitude.toString());
+			formData.append('status', newCCTV.status);
+
+			if (newCCTV.accidentVideo) {
+				formData.append('accidentVideo', newCCTV.accidentVideo);
+			}
+
 			const response = await fetch('/api/cctvs', {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify(newCCTV),
+				body: formData,
 			});
 
 			if (!response.ok) {

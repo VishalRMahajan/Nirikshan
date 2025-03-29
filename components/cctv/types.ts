@@ -8,6 +8,8 @@ export type CCTV = {
 	rtspUrl: string;
 	status: string;
 	createdAt: string;
+	accidentVideoUrl?: string;
+	hasAccidentVideo?: boolean;
 };
 
 export type CCTVStatusFilterValue = string[];

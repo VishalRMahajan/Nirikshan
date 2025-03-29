@@ -3,40 +3,47 @@ import { prisma } from '@/prisma';
 
 export async function PATCH(
 	request: NextRequest,
-	{ params }: { params: { id: string } }
+	context: { params: Promise<{ id: string }> }
 ) {
 	try {
-		const { id } = await params;
+		const { id: idParam } = await context.params;
+		const id = parseInt(idParam, 10);
+		if (isNaN(id)) {
+			return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
+		}
 
-		let data;
-		try {
-			const contentType = request.headers.get('content-type');
-			if (!contentType || !contentType.includes('application/json')) {
-				return NextResponse.json(
-					{ error: 'Content-Type must be application/json' },
-					{ status: 400 }
-				);
-			}
+		const contentType = request.headers.get('content-type') || '';
+		let name,
+			rtspUrl,
+			latitude,
+			longitude,
+			status,
+			accidentVideo,
+			removeExistingVideo;
 
-			const clonedRequest = request.clone();
-			const rawBody = await clonedRequest.text();
-
-			if (!rawBody || rawBody.trim() === '') {
-				return NextResponse.json(
-					{ error: 'Empty request body' },
-					{ status: 400 }
-				);
-			}
-
-			data = JSON.parse(rawBody);
-		} catch (e) {
+		if (contentType.includes('multipart/form-data')) {
+			const formData = await request.formData();
+			name = formData.get('name') as string;
+			rtspUrl = formData.get('rtspUrl') as string;
+			latitude = parseFloat(formData.get('latitude') as string);
+			longitude = parseFloat(formData.get('longitude') as string);
+			status = formData.get('status') as string;
+			accidentVideo = formData.get('accidentVideo') as File | null;
+			removeExistingVideo = formData.get('removeExistingVideo') === 'true';
+		} else if (contentType.includes('application/json')) {
+			const jsonData = await request.json();
+			name = jsonData.name;
+			rtspUrl = jsonData.rtspUrl;
+			latitude = jsonData.latitude;
+			longitude = jsonData.longitude;
+			status = jsonData.status;
+		} else {
 			return NextResponse.json(
-				{ error: 'Invalid JSON in request body' },
+				{ error: 'Unsupported content type' },
 				{ status: 400 }
 			);
 		}
 
-		const { name, rtspUrl, latitude, longitude, status } = data;
 		if (
 			!name ||
 			!rtspUrl ||
@@ -58,29 +65,48 @@ export async function PATCH(
 			);
 		}
 
-		const existingCCTV = await prisma.cCTV.findUnique({
-			where: { id },
-		});
-
+		const existingCCTV = await prisma.cCTV.findUnique({ where: { id } });
 		if (!existingCCTV) {
 			return NextResponse.json({ error: 'CCTV not found' }, { status: 404 });
 		}
 
+		const updateData: any = { name, rtspUrl, latitude, longitude, status };
+
+		if (removeExistingVideo) {
+			updateData.accidentVideoUrl = null;
+			updateData.hasAccidentVideo = false;
+		}
+
+		if (accidentVideo) {
+			const { writeFile, mkdir } = await import('fs/promises');
+			const { join } = await import('path');
+			const { cwd } = await import('process');
+			const { existsSync } = await import('fs');
+
+			const fileName = `${Date.now()}-${accidentVideo.name}`;
+			const uploadDir = join(cwd(), 'public', 'uploads');
+			if (!existsSync(uploadDir)) {
+				await mkdir(uploadDir, { recursive: true });
+			}
+			const filePath = join(uploadDir, fileName);
+			const buffer = Buffer.from(await accidentVideo.arrayBuffer());
+			await writeFile(filePath, buffer);
+			updateData.accidentVideoUrl = `/uploads/${fileName}`;
+			updateData.hasAccidentVideo = true;
+		}
+
 		const updatedCCTV = await prisma.cCTV.update({
 			where: { id },
-			data: {
-				name,
-				rtspUrl,
-				latitude,
-				longitude,
-				status,
-			},
+			data: updateData,
 		});
-
-		return NextResponse.json(updatedCCTV, { status: 200 });
+		return NextResponse.json({
+			...updatedCCTV,
+			createdAt: updatedCCTV.createdAt.toISOString(),
+		});
 	} catch (error) {
+		console.error('PATCH error:', error);
 		return NextResponse.json(
-			{ error: 'Internal server error' },
+			{ error: 'Internal server error', details: (error as Error).message },
 			{ status: 500 }
 		);
 	}
@@ -90,32 +116,45 @@ export async function DELETE(
 	request: Request,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const { id } = await params;
-	await prisma.cCTV.delete({
-		where: { id },
-	});
-	return NextResponse.json({ message: 'Deleted successfully' });
+	const { id: idParam } = await params;
+	const id = parseInt(idParam, 10);
+	if (isNaN(id)) {
+		return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
+	}
+	try {
+		const deletedCCTV = await prisma.cCTV.delete({ where: { id } });
+		return NextResponse.json({ message: 'Deleted successfully', id });
+	} catch (error) {
+		console.error('DELETE error:', error);
+		return NextResponse.json(
+			{ error: 'Internal server error', details: (error as Error).message },
+			{ status: 500 }
+		);
+	}
 }
 
 export async function GET(
 	request: Request,
-	{ params }: { params: { id: string } }
+	{ params }: { params: Promise<{ id: string }> }
 ) {
+	const { id: idParam } = await params;
+	const id = parseInt(idParam, 10);
+	if (isNaN(id)) {
+		return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
+	}
 	try {
-		const { id } = await params;
-
-		const cctv = await prisma.cCTV.findUnique({
-			where: { id },
-		});
-
+		const cctv = await prisma.cCTV.findUnique({ where: { id } });
 		if (!cctv) {
 			return NextResponse.json({ error: 'CCTV not found' }, { status: 404 });
 		}
-
-		return NextResponse.json(cctv);
+		return NextResponse.json({
+			...cctv,
+			createdAt: cctv.createdAt.toISOString(),
+		});
 	} catch (error) {
+		console.error('GET error:', error);
 		return NextResponse.json(
-			{ error: 'Internal server error' },
+			{ error: 'Internal server error', details: (error as Error).message },
 			{ status: 500 }
 		);
 	}

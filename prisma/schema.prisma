@@ -50,12 +50,14 @@ model Session {
   updatedAt DateTime @updatedAt
 }
 
-model CCTV {
-  id         String   @id @default(uuid())
-  name       String   // Camera name (e.g., "Lonavala Toll Booth")
+model cCTV {
+  id        Int     @id @default(autoincrement())
+  name      String
   rtspUrl   String
-  latitude   Float    // GPS coordinates
-  longitude  Float
-  status     String   @default("active") // active/inactive
-  createdAt  DateTime @default(now())
+  latitude  Float
+  longitude Float
+  status    String
+  accidentVideoUrl String?
+  hasAccidentVideo Boolean
+  createdAt DateTime @default(now())
 }

@@ -17,6 +17,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from '@/components/ui/select';
+import { Upload, Video, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 const MapComponent = dynamic(() => import('@/components/MapComponent'), {
@@ -32,6 +33,7 @@ type AddCCTVDialogProps = {
 		latitude: number;
 		longitude: number;
 		status: string;
+		accidentVideo?: File | null;
 	}) => void;
 };
 
@@ -47,6 +49,10 @@ export function AddCCTVDialog({
 		latitude: number;
 		longitude: number;
 	} | null>(null);
+	const [accidentVideo, setAccidentVideo] = React.useState<File | null>(null);
+	const [videoPreview, setVideoPreview] = React.useState<string | null>(null);
+
+	const fileInputRef = React.useRef<HTMLInputElement>(null);
 
 	const handleMapClick = (lat: number, lng: number) => {
 		setLocation({ latitude: lat, longitude: lng });
@@ -57,9 +63,44 @@ export function AddCCTVDialog({
 		return rtspRegex.test(url);
 	};
 
+	const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0] || null;
+
+		if (file) {
+			// Validate file type
+			if (!file.type.startsWith('video/')) {
+				alert('Please select a valid video file.');
+				return;
+			}
+
+			// Validate file size (limit to 100MB)
+			if (file.size > 100 * 1024 * 1024) {
+				alert('Video file size must be less than 100MB.');
+				return;
+			}
+
+			setAccidentVideo(file);
+
+			// Create a preview URL
+			const url = URL.createObjectURL(file);
+			setVideoPreview(url);
+		}
+	};
+
+	const handleRemoveVideo = () => {
+		setAccidentVideo(null);
+		if (videoPreview) {
+			URL.revokeObjectURL(videoPreview);
+			setVideoPreview(null);
+		}
+		if (fileInputRef.current) {
+			fileInputRef.current.value = '';
+		}
+	};
+
 	const handleSubmit = () => {
 		if (!name || !rtspUrl || !location) {
-			alert('Please fill in all fields and select a location.');
+			alert('Please fill in all required fields and select a location.');
 			return;
 		}
 
@@ -74,9 +115,19 @@ export function AddCCTVDialog({
 			latitude: location.latitude,
 			longitude: location.longitude,
 			status,
+			accidentVideo,
 		});
 		onClose();
 	};
+
+	// Clean up video preview URL when dialog closes
+	React.useEffect(() => {
+		return () => {
+			if (videoPreview) {
+				URL.revokeObjectURL(videoPreview);
+			}
+		};
+	}, [videoPreview]);
 
 	return (
 		<Dialog open={open} onOpenChange={onClose}>
@@ -119,6 +170,63 @@ export function AddCCTVDialog({
 									Example:
 									rtsp://admin:password@192.168.1.100:554/h264/ch1/main/av_stream
 								</p>
+							</div>
+
+							{/* Accident Video Upload */}
+							<div>
+								<label className='mb-2 block text-sm font-medium text-gray-300'>
+									Accident Video (Optional)
+								</label>
+								<div className='space-y-3'>
+									{!videoPreview ? (
+										<div className='flex items-center'>
+											<input
+												type='file'
+												ref={fileInputRef}
+												accept='video/*'
+												onChange={handleVideoChange}
+												className='hidden'
+												id='video-upload'
+											/>
+											<Button
+												variant='outline'
+												className='border-dashed border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
+												onClick={() => fileInputRef.current?.click()}
+												type='button'>
+												<Upload className='mr-2 h-4 w-4' />
+												Upload Video
+											</Button>
+										</div>
+									) : (
+										<div className='space-y-2'>
+											<div className='flex items-center justify-between rounded-md border border-gray-700 bg-gray-800 p-2'>
+												<div className='flex items-center'>
+													<Video className='mr-2 h-4 w-4 text-blue-400' />
+													<span className='max-w-[180px] truncate text-sm text-gray-300'>
+														{accidentVideo?.name}
+													</span>
+												</div>
+												<Button
+													variant='ghost'
+													size='icon'
+													className='h-6 w-6 text-gray-400 hover:text-white'
+													onClick={handleRemoveVideo}>
+													<X className='h-4 w-4' />
+												</Button>
+											</div>
+											<div className='overflow-hidden rounded-md border border-gray-700'>
+												<video
+													src={videoPreview}
+													controls
+													className='h-auto max-h-[200px] w-full'
+												/>
+											</div>
+										</div>
+									)}
+									<p className='text-xs text-gray-400'>
+										Supported formats: MP4, AVI, MOV (max 100MB)
+									</p>
+								</div>
 							</div>
 
 							{/* CCTV Status */}
