@@ -51,13 +51,13 @@ model Session {
 }
 
 model cCTV {
-  id        Int     @id @default(autoincrement())
-  name      String
-  rtspUrl   String
-  latitude  Float
-  longitude Float
-  status    String
-  accidentVideoUrl String?
-  hasAccidentVideo Boolean
-  createdAt DateTime @default(now())
+  id                Int      @id @default(autoincrement())
+  name              String
+  rtspUrl           String
+  latitude          Float
+  longitude         Float
+  status            String
+  accidentVideoUrl  String?  // Add this field
+  hasAccidentVideo  Boolean  @default(false)
+  createdAt         DateTime @default(now())
 }

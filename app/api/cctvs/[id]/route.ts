@@ -65,7 +65,9 @@ export async function PATCH(
 			);
 		}
 
-		const existingCCTV = await prisma.cCTV.findUnique({ where: { id } });
+		const existingCCTV = await prisma.cCTV.findUnique({
+			where: { id },
+		});
 		if (!existingCCTV) {
 			return NextResponse.json({ error: 'CCTV not found' }, { status: 404 });
 		}
@@ -122,7 +124,9 @@ export async function DELETE(
 		return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
 	}
 	try {
-		const deletedCCTV = await prisma.cCTV.delete({ where: { id } });
+		const deletedCCTV = await prisma.cCTV.delete({
+			where: { id },
+		});
 		return NextResponse.json({ message: 'Deleted successfully', id });
 	} catch (error) {
 		console.error('DELETE error:', error);
