@@ -5,14 +5,15 @@ import numpy as np
 import json
 import asyncio
 import tempfile
-import urllib.request
 import os
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Set
+from typing import Dict, Set, List, Deque
+from collections import deque
+import base64
 from fastapi.responses import JSONResponse
 from Nirikshan.pipeline.training_pipeline import TrainingPipeline
 from Nirikshan.logger import logging
+from pathlib import Path
 
 app = FastAPI()
 pipeline = TrainingPipeline()
@@ -26,10 +27,15 @@ app.add_middleware(
 )
 
 active_connections: Dict[str, WebSocket] = {}
-processing_tasks: Dict[str, asyncio.Task] = {}
-detected_accidents: Dict[str, Set[int]] = {}  # Track detected accidents by connection_id and frame range
+detected_accidents: Dict[str, Set[int]] = {}  
+frame_buffers: Dict[str, Deque] = {}  
+MIN_FRAMES_BETWEEN_DETECTIONS = 30  
+BUFFER_SIZE = 15 
+POST_ACCIDENT_FRAMES = 15 
 
-MIN_FRAMES_BETWEEN_DETECTIONS = 60  # Minimum frames between accident detections
+# Create accident clips directory if it doesn't exist
+ACCIDENT_CLIPS_DIR = Path("accident_clips")
+ACCIDENT_CLIPS_DIR.mkdir(exist_ok=True)
 
 @app.websocket("/ws/detect")
 async def accident_detection_websocket(websocket: WebSocket):
@@ -38,225 +44,222 @@ async def accident_detection_websocket(websocket: WebSocket):
     connection_id = f"conn_{id(websocket)}"
     active_connections[connection_id] = websocket
     detected_accidents[connection_id] = set()
-    
-    video_temp = None
-    cap = None
-    processing_task = None
+    frame_buffers[connection_id] = deque(maxlen=BUFFER_SIZE)
     
     try:
+        logging.info(f"Client connected: {connection_id}")
         await websocket.send_json({
             "message": "Connected to accident detection service",
             "severity": "info"
         })
         
+        await websocket.send_json({
+            "type": "ready",
+            "message": "Backend ready for frame processing",
+            "severity": "info"
+        })
+        
+        frame_count = 0
+        accident_found = False
+        recording_accident = False
+        post_accident_count = 0
+        accident_frames = []
+        current_accident_range = None
+        
         while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
+            message = await websocket.receive()
             
-            if "video_url" in message:
-                video_url = message["video_url"]
-                cctv_id = message.get("cctv_id", "unknown")
+            # Handle text messages (control commands)
+            if "text" in message:
+                data = json.loads(message["text"])
+                logging.info(f"Received text message: {data}")
                 
-                if processing_task and not processing_task.done():
-                    processing_task.cancel()
-                    await asyncio.sleep(0.1)
+                if data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
                 
-                # Reset accident tracking for new video
-                detected_accidents[connection_id] = set()
+                elif data.get("type") == "video_ended":
+                    # If we were recording an accident clip, finalize it
+                    if recording_accident and accident_frames:
+                        clip_path = save_accident_clip(accident_frames, connection_id, current_accident_range)
+                        if clip_path:
+                            await websocket.send_json({
+                                "message": f"Saved accident clip to {clip_path}",
+                                "severity": "info",
+                                "accident_clip": str(clip_path)
+                            })
+                    
+                    await websocket.send_json({
+                        "message": "Video playback ended",
+                        "severity": "info",
+                        "type": "processing_complete",
+                        "accident_found": accident_found
+                    })
+                    logging.info(f"Video ended notification from client {connection_id}")
                 
-                await websocket.send_json({
-                    "message": f"Starting accident detection for camera {cctv_id}",
-                    "severity": "info"
-                })
-                
-                pipeline.reset_state()
-                
-                video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+                elif data.get("type") == "start_detection":
+                    detected_accidents[connection_id] = set()
+                    frame_buffers[connection_id].clear()
+                    frame_count = 0
+                    accident_found = False
+                    recording_accident = False
+                    post_accident_count = 0
+                    accident_frames = []
+                    current_accident_range = None
+                    pipeline.reset_state()
+                    
+                    await websocket.send_json({
+                        "message": "Started new detection session",
+                        "severity": "info"
+                    })
+                    logging.info(f"Started new detection session for client {connection_id}")
+            
+            elif "bytes" in message:
+                frame_count += 1
                 
                 try:
-                    # Download the video
-                    if video_url.startswith('http'):
-                        urllib.request.urlretrieve(video_url, video_temp.name)
-                        video_path = video_temp.name
-                    else:
-                        if not video_url.startswith('/'):
-                            video_url = '/' + video_url
-                        full_url = f"http://localhost:3000{video_url}"
-                        urllib.request.urlretrieve(full_url, video_temp.name)
-                        video_path = video_temp.name
+                    # Process frame data
+                    frame_data = message["bytes"]
+                    nparr = np.frombuffer(frame_data, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                     
-                    cap = cv2.VideoCapture(video_path)
+                    if frame is not None:
+                        frame_buffers[connection_id].append(frame)
+                        
+                        if recording_accident:
+                            accident_frames.append(frame)
+                            post_accident_count += 1
+                            
+                            # If we've recorded enough post-accident frames, save the clip
+                            if post_accident_count >= POST_ACCIDENT_FRAMES:
+                                clip_path = save_accident_clip(accident_frames, connection_id, current_accident_range)
+                                if clip_path:
+                                    await websocket.send_json({
+                                        "message": f"Saved accident clip to {clip_path}",
+                                        "severity": "info",
+                                        "accident_clip": str(clip_path)
+                                    })
+                                recording_accident = False
+                                accident_frames = []
+                                post_accident_count = 0
+                                current_accident_range = None
+                        
+                        # Process frame with detection pipeline
+                        result = pipeline.process_frame(frame)
+                        
+                        # Check for accident detection
+                        if result == "Accident detected":
+                            # Check if we've detected an accident in this frame range
+                            frame_range_key = frame_count // MIN_FRAMES_BETWEEN_DETECTIONS
+                            
+                            if frame_range_key not in detected_accidents[connection_id]:
+                                detected_accidents[connection_id].add(frame_range_key)
+                                accident_found = True
+                                current_accident_range = frame_range_key
+                                
+                                boxes, class_ids, confidences = pipeline.model_trainer.detect_objects(frame)
+                                accident_indices = [
+                                    i for i, (cls, conf) in enumerate(zip(class_ids, confidences))
+                                    if cls in pipeline.ACCIDENT_CLASS_IDS and conf >= pipeline.CONFIDENCE_THRESHOLD
+                                ]
+                                
+                                if accident_indices:
+                                    confidence = float(confidences[accident_indices[0]])
+                                    
+                                    await websocket.send_json({
+                                        "accident_detected": True,
+                                        "frame_number": frame_count,
+                                        "confidence": confidence,
+                                        "message": f"Accident detected at frame {frame_count}",
+                                        "severity": "error",
+                                        "timestamp": datetime.now().timestamp()
+                                    })
+                                    logging.info(f"Accident detected for client {connection_id} at frame {frame_count}")
+                                    
+                                    # Start recording accident clip
+                                    if not recording_accident:
+                                        recording_accident = True
+                                        post_accident_count = 0
+                                        # Initialize with buffer frames (before accident)
+                                        accident_frames = list(frame_buffers[connection_id])
+                                        await websocket.send_json({
+                                            "message": f"Recording accident clip starting at frame {frame_count}",
+                                            "severity": "info"
+                                        })
                     
-                    if not cap.isOpened():
+                    if frame_count % 10 == 0:
                         await websocket.send_json({
-                            "message": f"Error: Could not open video stream from {video_url}",
-                            "severity": "error"
+                            "message": f"Processed {frame_count} frames",
+                            "severity": "info",
+                            "frame_count": frame_count
                         })
-                        continue
-                    
-                    # Get video properties for one-time processing
-                    fps = cap.get(cv2.CAP_PROP_FPS)
-                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    
-                    # Important: Send ready notification before starting processing
-                    await websocket.send_json({
-                        "type": "ready",
-                        "message": "Backend ready to process video",
-                        "severity": "info",
-                        "total_frames": total_frames,
-                        "fps": fps
-                    })
-                    
-                    # Wait a moment to ensure frontend received the ready message
-                    await asyncio.sleep(0.5)
-                    
-                    processing_task = asyncio.create_task(
-                        process_video_once(websocket, cap, connection_id, total_frames)
-                    )
-                    processing_tasks[connection_id] = processing_task
-                    
+                
                 except Exception as e:
+                    logging.error(f"Error processing frame {frame_count}: {str(e)}")
                     await websocket.send_json({
-                        "message": f"Error setting up video: {str(e)}",
-                        "severity": "error"
+                        "message": f"Error processing frame {frame_count}: {str(e)}",
+                        "severity": "warning"
                     })
-            
-            elif message.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-            
-            elif message.get("type") == "video_ended":
-                # Frontend notifies that video playback has completed
-                if processing_task and not processing_task.done():
-                    processing_task.cancel()
-                    await websocket.send_json({
-                        "message": "Detection stopped as video playback ended",
-                        "severity": "info",
-                        "type": "processing_complete"
-                    })
-            
+    
     except WebSocketDisconnect:
         logging.info(f"Client disconnected: {connection_id}")
     
     except Exception as e:
+        logging.error(f"Error in WebSocket: {str(e)}")
         try:
             await websocket.send_json({
-                "message": f"Error in WebSocket connection: {str(e)}",
+                "message": f"Error in detection service: {str(e)}",
                 "severity": "error"
             })
         except:
             pass
-        logging.error(f"WebSocket error: {str(e)}")
     
     finally:
         if connection_id in active_connections:
             del active_connections[connection_id]
-        
-        if connection_id in processing_tasks:
-            task = processing_tasks[connection_id]
-            if task and not task.done():
-                task.cancel()
-            del processing_tasks[connection_id]
-        
         if connection_id in detected_accidents:
             del detected_accidents[connection_id]
-        
-        if cap and cap.isOpened():
-            cap.release()
-        
-        if video_temp:
-            try:
-                os.unlink(video_temp.name)
-            except:
-                pass
+        if connection_id in frame_buffers:
+            del frame_buffers[connection_id]
+        logging.info(f"Cleaned up connection: {connection_id}")
 
-async def process_video_once(websocket: WebSocket, cap: cv2.VideoCapture, connection_id: str, total_frames: int):
-    """Process the video only once rather than looping continuously"""
-    frame_count = 0
-    log_interval = 30
-    found_accident = False
+
+def save_accident_clip(frames, connection_id, frame_range):
+    """Save accident frames as a video clip"""
+    if not frames:
+        return None
     
     try:
-        await websocket.send_json({
-            "message": "Starting one-time accident detection analysis",
-            "severity": "info"
-        })
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = ACCIDENT_CLIPS_DIR / f"accident_{connection_id}_{frame_range}_{timestamp}.mp4"
         
-        while cap.isOpened() and connection_id in active_connections and frame_count < total_frames:
-            ret, frame = cap.read()
-            
-            if not ret:
-                await websocket.send_json({
-                    "message": "End of video reached, detection complete",
-                    "severity": "info",
-                    "type": "processing_complete"
-                })
-                break
-            
-            frame_count += 1
-            
-            if frame_count % 1 == 0:
-                result = pipeline.process_frame(frame)
-                
-                if result == "Accident detected":
-                    # Check if we've already detected an accident in this frame range
-                    frame_range_key = frame_count // MIN_FRAMES_BETWEEN_DETECTIONS
-                    
-                    if frame_range_key not in detected_accidents[connection_id]:
-                        detected_accidents[connection_id].add(frame_range_key)
-                        found_accident = True
-                        
-                        boxes, class_ids, confidences = pipeline.model_trainer.detect_objects(frame)
-                        accident_indices = [
-                            i for i, (cls, conf) in enumerate(zip(class_ids, confidences))
-                            if cls in pipeline.ACCIDENT_CLASS_IDS and conf >= pipeline.CONFIDENCE_THRESHOLD
-                        ]
-                        
-                        if accident_indices:
-                            confidence = float(confidences[accident_indices[0]])
-                            
-                            await websocket.send_json({
-                                "accident_detected": True,
-                                "frame_number": frame_count,
-                                "confidence": confidence,
-                                "message": f"Accident detected at frame {frame_count}",
-                                "severity": "error",
-                                "timestamp": datetime.now().timestamp()
-                            })
-            
-            if frame_count % log_interval == 0:
-                progress = min(100, int((frame_count / total_frames) * 100))
-                await websocket.send_json({
-                    "message": f"Processed {frame_count}/{total_frames} frames ({progress}%)",
-                    "severity": "info",
-                    "progress": progress
-                })
-            
-            await asyncio.sleep(0.01)  # Prevent blocking
+        # Get frame dimensions from first frame
+        height, width = frames[0].shape[:2]
         
-        # Send completion message
-        if connection_id in active_connections:
-            await websocket.send_json({
-                "message": "Video analysis complete",
-                "severity": "info",
-                "type": "processing_complete",
-                "accident_found": found_accident
-            })
-    
-    except asyncio.CancelledError:
-        if connection_id in active_connections:
-            await websocket.send_json({
-                "message": "Video processing cancelled",
-                "severity": "info",
-                "type": "processing_complete"
-            })
+        # Create VideoWriter with correct frame rate
+        # Changed from 15.0 to 5.0 to match frontend frame capture rate
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(str(output_path), fourcc, 5.0, (width, height))
+        
+        # Write frames to video
+        for frame in frames:
+            out.write(frame)
+        
+        out.release()
+        logging.info(f"Saved accident clip to {output_path}")
+        return output_path
     
     except Exception as e:
-        logging.error(f"Error processing video: {str(e)}")
-        if connection_id in active_connections:
-            await websocket.send_json({
-                "message": f"Error processing video: {str(e)}",
-                "severity": "error"
-            })
+        logging.error(f"Error saving accident clip: {str(e)}")
+        return None
+
+
+def base64_to_image(base64_string):
+    if "base64," in base64_string:
+        base64_string = base64_string.split("base64,")[1]
+    imgdata = base64.b64decode(base64_string)
+    nparr = np.frombuffer(imgdata, np.uint8)
+    return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
 
 @app.post("/detect/image")
 async def detect_image(file: UploadFile = File(...)):
@@ -266,14 +269,17 @@ async def detect_image(file: UploadFile = File(...)):
     result = pipeline.process_frame(img)
     return JSONResponse(content={"result": result})
 
+
 @app.post("/detect/video")
 async def detect_video(file: UploadFile = File(...)):
     contents = await file.read()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    video_path = Path(f"uploads/videoUpload_{timestamp}.mp4")
-    video_path.parent.mkdir(parents=True, exist_ok=True)
+    video_path = os.path.join("uploads", f"videoUpload_{timestamp}.mp4")
+    os.makedirs("uploads", exist_ok=True)
+    
     with open(video_path, "wb") as f:
         f.write(contents)
+    
     pipeline.reset_state()
     result = pipeline.process_video(video_path)
     return JSONResponse(content={"result": result})
