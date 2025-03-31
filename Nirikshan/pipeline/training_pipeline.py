@@ -126,10 +126,10 @@ class TrainingPipeline:
         
         return "Accident detected" if self.accident_detected_in_video else "No accident detected"
 
-    def process_live_feed(self, rtsp_url):
+    def process_live_feed(self, url):
         self.reset_state()
         
-        cap = cv2.VideoCapture(rtsp_url)
+        cap = cv2.VideoCapture(url)
         if not cap.isOpened():
             return "Error: Could not open RTSP stream"
         
