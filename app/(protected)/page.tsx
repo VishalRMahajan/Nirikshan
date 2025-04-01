@@ -40,22 +40,18 @@ export default function Page() {
 	const [detectionActive, setDetectionActive] = useState(false);
 	const [videoLoaded, setVideoLoaded] = useState(false);
 	const [backendReady, setBackendReady] = useState(false);
-	const [videoPlayInitiated, setVideoPlayInitiated] = useState(false);
-	const [isProcessingFrame, setIsProcessingFrame] = useState(false);
 	const [logs, setLogs] = useState<DetectionLog[]>([]);
 	const [connectionStatus, setConnectionStatus] = useState<
 		'disconnected' | 'connecting' | 'connected'
 	>('disconnected');
 	const [lastProcessedTimestamp, setLastProcessedTimestamp] =
 		useState<number>(0);
+	const [processingComplete, setProcessingComplete] = useState(false);
 
-	const videoRef = useRef<HTMLVideoElement>(null);
 	const wsRef = useRef<WebSocket | null>(null);
+	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const logsEndRef = useRef<HTMLDivElement>(null);
-	const frameProcessingInterval = useRef<NodeJS.Timeout | null>(null);
-	const frameCount = useRef(0);
 	const { toast } = useToast();
-	const frameRate = 5; // Process 5 frames per second
 
 	useEffect(() => {
 		if (logsEndRef.current) {
@@ -68,11 +64,6 @@ export default function Page() {
 			if (wsRef.current) {
 				wsRef.current.close();
 				wsRef.current = null;
-			}
-
-			if (frameProcessingInterval.current) {
-				clearInterval(frameProcessingInterval.current);
-				frameProcessingInterval.current = null;
 			}
 		};
 	}, []);
@@ -96,107 +87,6 @@ export default function Page() {
 			if (pingInterval) clearInterval(pingInterval);
 		};
 	}, [connectionStatus]);
-
-	// Effect to start video playback and frame capture when ready
-	useEffect(() => {
-		if (
-			selectedCCTV &&
-			videoRef.current &&
-			videoLoaded &&
-			backendReady &&
-			!videoPlayInitiated
-		) {
-			addLog('Backend ready, starting video playback', 'info');
-			setVideoPlayInitiated(true);
-
-			videoRef.current
-				.play()
-				.then(() => {
-					// Start frame capture after video starts playing
-					setupFrameCapture();
-				})
-				.catch(err => {
-					console.error('Failed to autoplay:', err);
-					addLog(
-						"Couldn't autoplay video - user interaction required",
-						'warning'
-					);
-					setVideoPlayInitiated(false);
-				});
-		}
-	}, [videoLoaded, backendReady, selectedCCTV, videoPlayInitiated]);
-
-	// Setup function to capture and send frames
-	const setupFrameCapture = () => {
-		if (!videoRef.current || !wsRef.current || frameProcessingInterval.current)
-			return;
-
-		addLog(`Starting frame capture at ${frameRate} FPS`, 'info');
-		frameCount.current = 0;
-
-		// Tell backend we're starting a new detection session
-		if (wsRef.current.readyState === WebSocket.OPEN) {
-			wsRef.current.send(JSON.stringify({ type: 'start_detection' }));
-		}
-
-		// Calculate interval based on frame rate
-		const intervalMs = 1000 / frameRate;
-
-		frameProcessingInterval.current = setInterval(() => {
-			captureAndSendFrame();
-		}, intervalMs);
-	};
-
-	// Function to capture and send frames to backend
-	const captureAndSendFrame = async () => {
-		if (
-			!videoRef.current ||
-			!wsRef.current ||
-			wsRef.current.readyState !== WebSocket.OPEN ||
-			isProcessingFrame
-		) {
-			return;
-		}
-
-		try {
-			setIsProcessingFrame(true);
-			frameCount.current++;
-
-			// Create a canvas to draw the current video frame
-			const canvas = document.createElement('canvas');
-			const context = canvas.getContext('2d');
-
-			const video = videoRef.current;
-			const width = video.videoWidth;
-			const height = video.videoHeight;
-
-			// Set canvas size to match video frame
-			canvas.width = width;
-			canvas.height = height;
-
-			// Draw current video frame to canvas
-			context?.drawImage(video, 0, 0, width, height);
-
-			// Convert canvas to blob
-			const blob = await new Promise<Blob>(resolve => {
-				canvas.toBlob(
-					blob => {
-						if (blob) resolve(blob);
-						else resolve(new Blob([]));
-					},
-					'image/jpeg',
-					0.8
-				); // JPEG with 80% quality for smaller size
-			});
-
-			// Send blob to backend
-			wsRef.current.send(blob);
-		} catch (error) {
-			console.error('Error capturing frame:', error);
-		} finally {
-			setIsProcessingFrame(false);
-		}
-	};
 
 	const addLog = (
 		message: string,
@@ -241,11 +131,6 @@ export default function Page() {
 	};
 
 	const cleanupExistingConnection = () => {
-		if (frameProcessingInterval.current) {
-			clearInterval(frameProcessingInterval.current);
-			frameProcessingInterval.current = null;
-		}
-
 		if (wsRef.current) {
 			wsRef.current.close();
 			wsRef.current = null;
@@ -256,9 +141,16 @@ export default function Page() {
 		setDetectionActive(false);
 		setVideoLoaded(false);
 		setBackendReady(false);
-		setVideoPlayInitiated(false);
 		setLastProcessedTimestamp(0);
-		frameCount.current = 0;
+		setProcessingComplete(false);
+
+		// Clear canvas
+		if (canvasRef.current) {
+			const ctx = canvasRef.current.getContext('2d');
+			if (ctx) {
+				ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+			}
+		}
 	};
 
 	const handleCameraSelect = (camera: CCTV) => {
@@ -283,7 +175,23 @@ export default function Page() {
 			const ws = new WebSocket(`${protocol}//${host}/ws/detect`);
 			wsRef.current = ws;
 
-			ws.onopen = handleWebSocketOpen(camera);
+			ws.onopen = () => {
+				setConnectionStatus('connected');
+				addLog('Connected to detection service', 'info');
+				setDetectionActive(true);
+
+				// Send the video URL to the backend for processing
+				const videoUrl = camera.accidentVideoUrl;
+				ws.send(
+					JSON.stringify({
+						type: 'process_video',
+						video_url: videoUrl,
+					})
+				);
+
+				addLog(`Sent video URL to backend for processing`, 'info');
+			};
+
 			ws.onmessage = handleWebSocketMessage;
 			ws.onclose = handleWebSocketClose;
 			ws.onerror = handleWebSocketError;
@@ -294,37 +202,33 @@ export default function Page() {
 		}
 	};
 
-	const handleWebSocketOpen = (camera: CCTV) => () => {
-		setConnectionStatus('connected');
-		addLog('Connected to detection service', 'info');
-		setDetectionActive(true);
-
-		// We don't send the video URL anymore since we'll be sending frames directly
-		addLog('Ready to process video frames', 'info');
-	};
-
 	const handleWebSocketMessage = (event: MessageEvent) => {
 		try {
 			const data = JSON.parse(event.data);
-			console.log('Received WebSocket message:', data);
+			console.log('Received WebSocket message type:', data.type);
 
 			// Check for backend ready notification
 			if (data.type === 'ready') {
 				setBackendReady(true);
-				addLog('Backend is ready to start detection', 'info');
+				addLog('Backend is ready to process video', 'info');
+			}
+
+			// Handle frame data from backend
+			if (data.type === 'frame') {
+				// Display the frame on canvas
+				displayFrame(data.frame);
+
+				// If we're not showing the video element, make sure we set videoLoaded
+				if (!videoLoaded) {
+					setVideoLoaded(true);
+				}
 			}
 
 			// Handle processing complete message
 			if (data.type === 'processing_complete') {
 				setDetectionActive(false);
-
-				// Clear the frame processing interval
-				if (frameProcessingInterval.current) {
-					clearInterval(frameProcessingInterval.current);
-					frameProcessingInterval.current = null;
-				}
-
-				addLog('Detection processing completed', 'info');
+				setProcessingComplete(true);
+				addLog('Video processing completed', 'info');
 
 				if (data.accident_found) {
 					addLog('Accident was detected in this video', 'warning');
@@ -341,7 +245,10 @@ export default function Page() {
 					setAccidentDetected(true);
 
 					const confidence = data.confidence || 0;
-					addLog(`⚠️ ACCIDENT DETECTED!`, 'error');
+					addLog(
+						`⚠️ ACCIDENT DETECTED! (confidence: ${(confidence * 100).toFixed(1)}%)`,
+						'error'
+					);
 
 					toast({
 						title: 'Accident Detected!',
@@ -365,17 +272,33 @@ export default function Page() {
 		}
 	};
 
+	const displayFrame = (base64Image: string) => {
+		if (!canvasRef.current) return;
+
+		const ctx = canvasRef.current.getContext('2d');
+		if (!ctx) return;
+
+		const img = new Image();
+		img.onload = () => {
+			// Set canvas size to match the image if needed
+			if (canvasRef.current) {
+				if (
+					canvasRef.current.width !== img.width ||
+					canvasRef.current.height !== img.height
+				) {
+					canvasRef.current.width = img.width;
+					canvasRef.current.height = img.height;
+				}
+				ctx.drawImage(img, 0, 0);
+			}
+		};
+		img.src = `data:image/jpeg;base64,${base64Image}`;
+	};
+
 	const handleWebSocketClose = (event: CloseEvent) => {
 		setConnectionStatus('disconnected');
 		setDetectionActive(false);
 		setBackendReady(false);
-		setVideoPlayInitiated(false);
-
-		// Clear frame processing interval
-		if (frameProcessingInterval.current) {
-			clearInterval(frameProcessingInterval.current);
-			frameProcessingInterval.current = null;
-		}
 
 		const reason =
 			event.reason ||
@@ -385,7 +308,8 @@ export default function Page() {
 
 		addLog(`Disconnected: ${reason}`, 'warning');
 
-		if (selectedCCTV) {
+		// Only try to reconnect if processing isn't complete
+		if (selectedCCTV && !processingComplete) {
 			const backoffTime = event.code === 1006 ? 3000 : 1000;
 			addLog(
 				`Attempting to reconnect in ${backoffTime / 1000} seconds...`,
@@ -393,7 +317,7 @@ export default function Page() {
 			);
 
 			setTimeout(() => {
-				if (selectedCCTV) {
+				if (selectedCCTV && !processingComplete) {
 					addLog('Reconnecting to detection service...', 'info');
 					connectToDetectionService(selectedCCTV);
 				}
@@ -401,60 +325,10 @@ export default function Page() {
 		}
 	};
 
-	const handleVideoEnded = () => {
-		addLog('Video playback completed', 'info');
-
-		// Stop frame processing
-		if (frameProcessingInterval.current) {
-			clearInterval(frameProcessingInterval.current);
-			frameProcessingInterval.current = null;
-		}
-
-		// Notify backend that video has ended
-		if (wsRef.current?.readyState === WebSocket.OPEN) {
-			wsRef.current.send(
-				JSON.stringify({
-					type: 'video_ended',
-				})
-			);
-		}
-	};
-
 	const handleWebSocketError = () => {
 		setConnectionStatus('disconnected');
 		setBackendReady(false);
-		setVideoPlayInitiated(false);
-
-		// Clear frame processing interval
-		if (frameProcessingInterval.current) {
-			clearInterval(frameProcessingInterval.current);
-			frameProcessingInterval.current = null;
-		}
-
 		addLog('WebSocket connection error', 'error');
-	};
-
-	const handleVideoLoaded = () => {
-		setVideoLoaded(true);
-		addLog('Video loaded successfully, waiting for backend to be ready');
-	};
-
-	const handleVideoError = () => {
-		setDetectionActive(false);
-		setVideoPlayInitiated(false);
-
-		// Clear frame processing interval
-		if (frameProcessingInterval.current) {
-			clearInterval(frameProcessingInterval.current);
-			frameProcessingInterval.current = null;
-		}
-
-		addLog('Error playing video', 'error');
-		toast({
-			title: 'Video Error',
-			description: 'There was a problem playing the selected video',
-			variant: 'destructive',
-		});
 	};
 
 	const formatDate = (dateString: string) => {
@@ -571,18 +445,12 @@ export default function Page() {
 											</div>
 										</div>
 									) : null}
-									<video
-										ref={videoRef}
-										src={selectedCCTV.accidentVideoUrl}
-										muted
+									<canvas
+										ref={canvasRef}
 										className={cn(
 											'aspect-video w-full rounded-none bg-black transition-opacity duration-300',
 											videoLoaded && backendReady ? 'opacity-100' : 'opacity-0'
 										)}
-										onLoadedData={handleVideoLoaded}
-										onError={handleVideoError}
-										onEnded={handleVideoEnded}
-										playsInline
 									/>
 								</div>
 							</CardContent>
