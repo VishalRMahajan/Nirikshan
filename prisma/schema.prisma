@@ -61,3 +61,20 @@ model cCTV {
   hasAccidentVideo  Boolean  @default(false)
   createdAt         DateTime @default(now())
 }
+
+model TrafficAidPost {
+  id                Int      @id @default(autoincrement())
+  name              String
+  address           String
+  latitude          Float
+  longitude         Float
+  contactNumber     String
+  hasPoliceService  Boolean  @default(false)
+  hasAmbulance      Boolean  @default(false)
+  hasFireService    Boolean  @default(false)
+  operatingHours    String   @default("24/7")
+  additionalInfo    String?  @db.Text
+  status            String   @default("active") // active, inactive, maintenance
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

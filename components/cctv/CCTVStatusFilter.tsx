@@ -32,7 +32,7 @@ export function CCTVStatusFilter({ table }: CCTVStatusFilterProps) {
 	};
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu modal={false}>
 			<DropdownMenuTrigger asChild>
 				<Button
 					variant='outline'
