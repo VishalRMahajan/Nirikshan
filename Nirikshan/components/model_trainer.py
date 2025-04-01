@@ -26,7 +26,6 @@ class ModelTrainer:
         resized_frame /= 255.0
 
         results = self.model(resized_frame)[0]
-        logging.info(f"Detection results: {results}")
         boxes = results.boxes.xyxy.cpu().numpy()  
         class_ids = results.boxes.cls.cpu().numpy()  
         confidences = results.boxes.conf.cpu().numpy()
