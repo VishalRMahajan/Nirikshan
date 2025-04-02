@@ -9,7 +9,6 @@ export async function GET() {
 			},
 		});
 
-		// Format dates as ISO strings for JSON serialization
 		const formattedPosts = posts.map(post => ({
 			...post,
 			id: post.id.toString(),
@@ -30,8 +29,6 @@ export async function GET() {
 export async function POST(request: NextRequest) {
 	try {
 		const data = await request.json();
-
-		// Validate required fields
 		const {
 			name,
 			address,

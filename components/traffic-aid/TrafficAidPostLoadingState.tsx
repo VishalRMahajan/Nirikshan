@@ -4,7 +4,6 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 
 export function TrafficAidPostLoadingState() {
-	// Use fixed widths instead of random ones to avoid hydration errors
 	const rowWidths = [
 		// Row 1
 		[80, 70, 90, 75, 85, 60],

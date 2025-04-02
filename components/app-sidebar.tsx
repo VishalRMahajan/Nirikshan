@@ -1,7 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { Command, Cctv, Pencil, Siren, Ambulance } from 'lucide-react';
+import {
+	Command,
+	Cctv,
+	Pencil,
+	Siren,
+	Ambulance,
+	AlertTriangle,
+	Clock,
+	CheckCircle2,
+	Bell,
+} from 'lucide-react';
 
 import { NavMain } from '@/components/nav-main';
 import { NavSecondary } from '@/components/nav-secondary';
@@ -41,19 +51,21 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 		],
 		navIncident: [
 			{
+				title: 'Pending Verification',
+				url: '/Pending_Verification',
+				icon: Clock,
+			},
+			{
 				title: 'Ongoing Incidents',
 				url: '/Ongoing_Incidents',
-				icon: Siren,
+				icon: AlertTriangle,
 			},
+		],
+		navTraffic: [
 			{
-				title: 'Past Incidents',
-				url: '/Past_Incidents',
-				icon: Ambulance,
-			},
-			{
-				title: 'Traffic Aid Post',
+				title: 'Traffic Aid',
 				url: '/Traffic_Aid',
-				icon: Ambulance,
+				icon: Siren,
 			},
 		],
 	};
@@ -80,6 +92,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 			<SidebarContent>
 				<NavMain heading={'CCTV'} items={data.navCCTV} />
 				<NavMain heading={'Incident'} items={data.navIncident} />
+				<NavMain heading={'Traffic'} items={data.navTraffic} />
 			</SidebarContent>
 			<SidebarFooter>
 				<NavUser user={data.user} />

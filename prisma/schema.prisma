@@ -8,15 +8,17 @@ generator client {
 }
  
 model User {
-  id            String          @id @default(cuid())
-  name          String?
-  email         String          @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String     @id @default(cuid())
+  name              String?
+  email             String     @unique
+  emailVerified     DateTime?
+  image             String?
+  accounts          Account[]
+  sessions          Session[]
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  verifiedIncidents Incident[] @relation("VerifiedIncidents")
+  resolvedIncidents Incident[] @relation("ResolvedIncidents")
 }
  
 model Account {
@@ -50,31 +52,89 @@ model Session {
   updatedAt DateTime @updatedAt
 }
 
-model cCTV {
-  id                Int      @id @default(autoincrement())
+model CCTV {
+  id                String     @id @default(cuid())
   name              String
   rtspUrl           String
   latitude          Float
   longitude         Float
   status            String
-  accidentVideoUrl  String?  // Add this field
-  hasAccidentVideo  Boolean  @default(false)
-  createdAt         DateTime @default(now())
+  accidentVideoUrl  String?
+  hasAccidentVideo  Boolean    @default(false)
+  createdAt         DateTime   @default(now())
+  incidents         Incident[]
+
+  @@map("cctvs")
 }
 
 model TrafficAidPost {
-  id                Int      @id @default(autoincrement())
+  id                String    @id @default(cuid())
   name              String
   address           String
   latitude          Float
   longitude         Float
   contactNumber     String
-  hasPoliceService  Boolean  @default(false)
-  hasAmbulance      Boolean  @default(false)
-  hasFireService    Boolean  @default(false)
-  operatingHours    String   @default("24/7")
-  additionalInfo    String?  @db.Text
-  status            String   @default("active") // active, inactive, maintenance
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  hasPoliceService  Boolean   @default(false)
+  hasAmbulance      Boolean   @default(false)
+  hasFireService    Boolean   @default(false)
+  operatingHours    String    @default("24/7")
+  additionalInfo    String?   @db.Text
+  status            String    @default("active") // active, inactive, maintenance
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("traffic_aid_posts")
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum IncidentSeverity {
+  CRITICAL
+  MAJOR
+  MINOR
+}
+
+enum IncidentType {
+  VEHICLE_COLLISION
+  FIRE
+  PEDESTRIAN_ACCIDENT
+  DEBRIS_ON_ROAD
+  STOPPED_VEHICLE
+  WRONG_WAY_DRIVER
+  OTHER
+}
+
+model Incident {
+  id                String             @id @default(cuid())
+  cctvId            String
+  cctv              CCTV               @relation(fields: [cctvId], references: [id])
+  detectedAt        DateTime           @default(now())
+  location          String?
+  latitude          Float?
+  longitude         Float?
+  confidenceScore   Float              @default(0)
+  imageUrl           String?
+  thumbnailUrl      String?
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedAt        DateTime?
+  verifiedBy        String?
+  verifiedByUser    User?              @relation("VerifiedIncidents", fields: [verifiedBy], references: [id])
+  incidentType      IncidentType?
+  severity          IncidentSeverity?
+  notes             String?
+  responseNeeded    Boolean            @default(false)
+  responseInitiated Boolean            @default(false)
+  resolvedAt        DateTime?
+  resolvedBy        String?
+  resolvedByUser    User?              @relation("ResolvedIncidents", fields: [resolvedBy], references: [id])
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([cctvId])
+  @@index([verificationStatus])
+  @@map("incidents")
 }

@@ -20,38 +20,26 @@ export async function POST(request: NextRequest) {
 		let accidentVideoUrl = null;
 		let hasAccidentVideo = false;
 
-		// Process video if provided
 		if (accidentVideo) {
-			// Create a unique filename
 			const fileName = `${Date.now()}-${accidentVideo.name}`;
-
-			// Define the upload directory
 			const uploadDir = join(cwd(), 'public', 'uploads');
 
-			// Create the directory if it doesn't exist
 			if (!existsSync(uploadDir)) {
 				await mkdir(uploadDir, { recursive: true });
 				console.log(`Created directory: ${uploadDir}`);
 			}
 
 			const filePath = join(uploadDir, fileName);
-
-			// Convert file to buffer
 			const buffer = Buffer.from(await accidentVideo.arrayBuffer());
 
-			// Save the file
 			await writeFile(filePath, buffer);
 			console.log(`File saved to: ${filePath}`);
 
-			// Set the URL and flag
 			accidentVideoUrl = `/uploads/${fileName}`;
 			hasAccidentVideo = true;
 		}
 
-		// Set current date explicitly for createdAt
 		const currentDate = new Date().toISOString();
-
-		// Create the CCTV in the database with the video information
 		const cctv = await prisma.cCTV.create({
 			data: {
 				name,
@@ -64,7 +52,6 @@ export async function POST(request: NextRequest) {
 			},
 		});
 
-		// Return formatted data with ISO string date
 		return NextResponse.json(
 			{
 				...cctv,
@@ -87,7 +74,6 @@ export async function GET() {
 			orderBy: { createdAt: 'desc' },
 		});
 
-		// Format dates to ISO strings for consistent handling
 		const formattedCctvs = cctvs.map(cctv => ({
 			...cctv,
 			createdAt: cctv.createdAt.toISOString(),
@@ -96,9 +82,6 @@ export async function GET() {
 		return NextResponse.json(formattedCctvs);
 	} catch (error) {
 		console.error('Error fetching CCTVs:', error);
-		return NextResponse.json(
-			{ error: 'Internal server error' },
-			{ status: 500 }
-		);
+		return NextResponse.json({ error: error }, { status: 500 });
 	}
 }

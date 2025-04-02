@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { ToastAction } from '@/components/ui/toast';
 
 type DetectionLog = {
 	time: string;
@@ -51,6 +52,7 @@ export default function Page() {
 	const wsRef = useRef<WebSocket | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const logsEndRef = useRef<HTMLDivElement>(null);
+	const currentCCTVRef = useRef<CCTV | null>(null);
 	const { toast } = useToast();
 
 	useEffect(() => {
@@ -58,6 +60,10 @@ export default function Page() {
 			logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
 		}
 	}, [logs]);
+
+	useEffect(() => {
+		currentCCTVRef.current = selectedCCTV;
+	}, [selectedCCTV]);
 
 	useEffect(() => {
 		return () => {
@@ -144,7 +150,6 @@ export default function Page() {
 		setLastProcessedTimestamp(0);
 		setProcessingComplete(false);
 
-		// Clear canvas
 		if (canvasRef.current) {
 			const ctx = canvasRef.current.getContext('2d');
 			if (ctx) {
@@ -156,6 +161,7 @@ export default function Page() {
 	const handleCameraSelect = (camera: CCTV) => {
 		cleanupExistingConnection();
 		setSelectedCCTV(camera);
+		currentCCTVRef.current = camera;
 		setShowSelectionDialog(false);
 		addLog('Initializing accident detection system...');
 		connectToDetectionService(camera);
@@ -180,19 +186,22 @@ export default function Page() {
 				addLog('Connected to detection service', 'info');
 				setDetectionActive(true);
 
-				// Send the video URL to the backend for processing
 				const videoUrl = camera.accidentVideoUrl;
 				ws.send(
 					JSON.stringify({
 						type: 'process_video',
 						video_url: videoUrl,
+						camera_id: camera.id,
+						camera_name: camera.name,
+						latitude: camera.latitude,
+						longitude: camera.longitude,
 					})
 				);
 
 				addLog(`Sent video URL to backend for processing`, 'info');
 			};
 
-			ws.onmessage = handleWebSocketMessage;
+			ws.onmessage = event => handleWebSocketMessage(event, camera);
 			ws.onclose = handleWebSocketClose;
 			ws.onerror = handleWebSocketError;
 		} catch (error) {
@@ -202,29 +211,26 @@ export default function Page() {
 		}
 	};
 
-	const handleWebSocketMessage = (event: MessageEvent) => {
+	const handleWebSocketMessage = (
+		event: MessageEvent,
+		cameraAtConnection?: CCTV
+	) => {
 		try {
 			const data = JSON.parse(event.data);
 			console.log('Received WebSocket message type:', data.type);
 
-			// Check for backend ready notification
 			if (data.type === 'ready') {
 				setBackendReady(true);
 				addLog('Backend is ready to process video', 'info');
 			}
 
-			// Handle frame data from backend
 			if (data.type === 'frame') {
-				// Display the frame on canvas
 				displayFrame(data.frame);
-
-				// If we're not showing the video element, make sure we set videoLoaded
 				if (!videoLoaded) {
 					setVideoLoaded(true);
 				}
 			}
 
-			// Handle processing complete message
 			if (data.type === 'processing_complete') {
 				setDetectionActive(false);
 				setProcessingComplete(true);
@@ -244,6 +250,14 @@ export default function Page() {
 					setLastProcessedTimestamp(messageTimestamp);
 					setAccidentDetected(true);
 
+					const camera =
+						cameraAtConnection || currentCCTVRef.current || selectedCCTV;
+
+					if (!camera) {
+						addLog('Error: No CCTV selected when accident detected', 'error');
+						return;
+					}
+
 					const confidence = data.confidence || 0;
 					addLog(
 						`⚠️ ACCIDENT DETECTED! (confidence: ${(confidence * 100).toFixed(1)}%)`,
@@ -252,11 +266,94 @@ export default function Page() {
 
 					toast({
 						title: 'Accident Detected!',
-						description: `Possible accident detected on camera: ${selectedCCTV?.name}`,
+						description: `Possible accident detected on camera: ${camera.name}`,
 						variant: 'destructive',
 						duration: 5000,
 					});
+				} else {
+					console.log('Ignoring duplicate accident detection message');
 				}
+			}
+
+			if (data.type === 'image_saved') {
+				const messageTimestamp = data.timestamp || Date.now();
+				const camera =
+					cameraAtConnection || currentCCTVRef.current || selectedCCTV;
+
+				if (!camera) {
+					addLog('Error: No CCTV selected when image was saved', 'error');
+					return;
+				}
+
+				console.log('Received accident image URL:', data.image_url);
+				addLog(`Accident image saved: ${data.image_url}`, 'info');
+
+				let thumbnailUrl = data.image_url;
+
+				const incidentData = {
+					cctvId: camera.id,
+					confidenceScore: data.confidence || 0,
+					imageUrl: data.image_url,
+					thumbnailUrl,
+					latitude: camera.latitude,
+					longitude: camera.longitude,
+					location:
+						data.location ||
+						`${camera.latitude.toFixed(6)}, ${camera.longitude.toFixed(6)}`,
+					incidentType: data.accident_type,
+					metadata: {
+						frameNumber: data.frame_number,
+						detectedAt: new Date().toISOString(),
+						accidentType: data.accident_type,
+						isLocalFile: true,
+					},
+				};
+
+				fetch('/api/incidents', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+					},
+					body: JSON.stringify(incidentData),
+				})
+					.then(async response => {
+						if (response.ok) {
+							const result = await response.json();
+							addLog(
+								`Incident #${result.id || ''} created and ready for verification`,
+								'info'
+							);
+							toast({
+								title: 'Incident Created!',
+								description: `Incident #${result.id} has been created and is ready for verification.`,
+								duration: 5000,
+								action: (
+									<ToastAction
+										className='font-semibold'
+										asChild
+										altText='View incident details'>
+										<a
+											href={`/incident_verification/${result.id}`}
+											target='_blank'>
+											View Incident
+										</a>
+									</ToastAction>
+								),
+							});
+						} else {
+							const errorText = await response
+								.text()
+								.catch(() => 'Unknown error');
+							addLog(
+								`Failed to create incident record: ${response.status} ${errorText}`,
+								'error'
+							);
+						}
+					})
+					.catch(error => {
+						console.error('Error creating incident:', error);
+						addLog(`Error creating incident: ${error.message}`, 'error');
+					});
 			}
 
 			if (data.message) {
@@ -280,7 +377,6 @@ export default function Page() {
 
 		const img = new Image();
 		img.onload = () => {
-			// Set canvas size to match the image if needed
 			if (canvasRef.current) {
 				if (
 					canvasRef.current.width !== img.width ||
@@ -308,8 +404,7 @@ export default function Page() {
 
 		addLog(`Disconnected: ${reason}`, 'warning');
 
-		// Only try to reconnect if processing isn't complete
-		if (selectedCCTV && !processingComplete) {
+		if (currentCCTVRef.current && !processingComplete) {
 			const backoffTime = event.code === 1006 ? 3000 : 1000;
 			addLog(
 				`Attempting to reconnect in ${backoffTime / 1000} seconds...`,
@@ -317,9 +412,9 @@ export default function Page() {
 			);
 
 			setTimeout(() => {
-				if (selectedCCTV && !processingComplete) {
+				if (currentCCTVRef.current && !processingComplete) {
 					addLog('Reconnecting to detection service...', 'info');
-					connectToDetectionService(selectedCCTV);
+					connectToDetectionService(currentCCTVRef.current);
 				}
 			}, backoffTime);
 		}
