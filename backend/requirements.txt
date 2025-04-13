@@ -1,6 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 opencv-python-headless
 numpy
 supervision
 ultralytics
+python-multipart

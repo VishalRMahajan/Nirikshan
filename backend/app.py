@@ -17,8 +17,6 @@ from Nirikshan.pipeline.training_pipeline import TrainingPipeline
 from Nirikshan.logger import logging
 from pathlib import Path
 import supervision as sv
-from dotenv import load_dotenv
-load_dotenv()
 
 app = FastAPI()
 pipeline = TrainingPipeline()
@@ -26,7 +24,7 @@ pipeline = TrainingPipeline()
 ACCIDENT_IMAGES_DIR = Path("accident_images")
 ACCIDENT_IMAGES_DIR.mkdir(exist_ok=True)
 
-PUBLIC_IMAGES_DIR = Path("D:/Nirikshan-AcciWatch/public/accident_images")
+PUBLIC_IMAGES_DIR = Path("../frontend/public/accident_images")
 PUBLIC_IMAGES_DIR.mkdir(exist_ok=True, parents=True)
 
 app.mount("/accident_images", StaticFiles(directory=str(ACCIDENT_IMAGES_DIR)), name="accident_images")
@@ -215,7 +213,7 @@ async def process_video_stream(websocket: WebSocket, video_url: str, connection_
         detected_confidence = None
         
         if video_url.startswith('/'):
-            video_path = f"d:/Nirikshan-AcciWatch/public{video_url}"
+            video_path = f"../frontend/public{video_url}"
         else:
             video_path = video_url
             
