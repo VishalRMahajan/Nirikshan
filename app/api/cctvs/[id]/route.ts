@@ -6,11 +6,7 @@ export async function PATCH(
 	context: { params: Promise<{ id: string }> }
 ) {
 	try {
-		const { id: idParam } = await context.params;
-		const id = parseInt(idParam, 10);
-		if (isNaN(id)) {
-			return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
-		}
+		const { id } = await context.params; // Use the id as a string directly
 
 		const contentType = request.headers.get('content-type') || '';
 		let name,
@@ -118,11 +114,7 @@ export async function DELETE(
 	request: Request,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const { id: idParam } = await params;
-	const id = parseInt(idParam, 10);
-	if (isNaN(id)) {
-		return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
-	}
+	const { id } = await params; // Use the id as a string directly
 	try {
 		const deletedCCTV = await prisma.cCTV.delete({
 			where: { id },
@@ -141,11 +133,7 @@ export async function GET(
 	request: Request,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const { id: idParam } = await params;
-	const id = parseInt(idParam, 10);
-	if (isNaN(id)) {
-		return NextResponse.json({ error: 'Invalid ID format' }, { status: 400 });
-	}
+	const { id } = await params; // Use the id as a string directly
 	try {
 		const cctv = await prisma.cCTV.findUnique({ where: { id } });
 		if (!cctv) {
