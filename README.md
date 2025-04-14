@@ -197,12 +197,6 @@ Nirikshan is an AI-powered accident detection system that leverages advanced com
 - All classes achieve ~99% mAP@50
 - Strongest performance: `car_object_accident` (97.6% mAP@50-95)
 
-### 📈 Training Progression
-
-- 📉 Consistent decrease in loss values (box, classification, DFL)
-- 📊 Steady improvement in precision and recall throughout training
-- ✅ No signs of overfitting (validation metrics track closely with training)
-
 ## 🗂️ Repository Structure
 
 The project is divided into two main parts:
